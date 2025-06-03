@@ -10,20 +10,41 @@
             direction: rtl;
             text-align: center;
             background-color: #f0f0f0;
+            margin: 0;
+            padding: 20px;
         }
         #video-grid {
             display: grid;
             grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-            gap: 10px;
-            margin: 20px;
+            gap: 15px;
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        .video-container {
+            position: relative;
+            border: 2px solid #333;
+            border-radius: 8px;
+            overflow: hidden;
+            background-color: #000;
         }
         video {
             width: 100%;
-            border: 2px solid #333;
-            border-radius: 8px;
+            height: auto;
+            display: block;
+        }
+        .user-id {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            background: rgba(0, 0, 0, 0.7);
+            color: white;
+            padding: 5px 10px;
+            border-radius: 4px;
+            font-size: 14px;
         }
         h1 {
             color: #333;
+            margin-bottom: 20px;
         }
     </style>
 </head>
@@ -39,19 +60,28 @@
         };
         let peerConnections = {};
         let localStream;
+        let localUserId = null;
 
         // دسترسی به دوربین
         async function startVideo() {
             try {
                 localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+                const videoContainer = document.createElement('div');
+                videoContainer.className = 'video-container';
+                videoContainer.id = 'video-local';
                 const videoElement = document.createElement('video');
                 videoElement.srcObject = localStream;
                 videoElement.muted = true; // بی‌صدا کردن ویدیوی خود کاربر
                 videoElement.play();
-                document.getElementById('video-grid').appendChild(videoElement);
+                videoContainer.appendChild(videoElement);
+                const userIdLabel = document.createElement('div');
+                userIdLabel.className = 'user-id';
+                userIdLabel.textContent = 'شما';
+                videoContainer.appendChild(userIdLabel);
+                document.getElementById('video-grid').appendChild(videoContainer);
             } catch (err) {
                 console.error('خطا در دسترسی به دوربین: ', err);
-                alert('لطفاً دسترسی به دوربین را مجاز کنید.');
+                alert('لطفاً دسترسی به دوربین و میکروفون را مجاز کنید.');
             }
         }
 
@@ -65,13 +95,19 @@
             const data = JSON.parse(event.data);
             const userId = data.userId;
 
-            if (data.type === 'new-user') {
+            if (!localUserId) {
+                localUserId = userId; // ذخیره آیدی کاربر محلی
+            }
+
+            if (data.type === 'new-user' && userId !== localUserId) {
                 // ایجاد اتصال جدید برای کاربر جدید
                 const pc = new RTCPeerConnection(configuration);
                 peerConnections[userId] = pc;
 
                 // اضافه کردن استریم محلی به اتصال
-                localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
+                if (localStream) {
+                    localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
+                }
 
                 // مدیریت ICE candidate
                 pc.onicecandidate = (event) => {
@@ -86,10 +122,18 @@
 
                 // دریافت استریم ریموت
                 pc.ontrack = (event) => {
+                    const videoContainer = document.createElement('div');
+                    videoContainer.className = 'video-container';
+                    videoContainer.id = `video-${userId}`;
                     const videoElement = document.createElement('video');
                     videoElement.srcObject = event.streams[0];
                     videoElement.play();
-                    document.getElementById('video-grid').appendChild(videoElement);
+                    videoContainer.appendChild(videoElement);
+                    const userIdLabel = document.createElement('div');
+                    userIdLabel.className = 'user-id';
+                    userIdLabel.textContent = `کاربر ${userId.slice(0, 8)}`;
+                    videoContainer.appendChild(userIdLabel);
+                    document.getElementById('video-grid').appendChild(videoContainer);
                 };
 
                 // ایجاد پیشنهاد (offer)
@@ -100,12 +144,14 @@
                     offer: offer,
                     to: userId
                 }));
-            } else if (data.type === 'offer') {
+            } else if (data.type === 'offer' && userId !== localUserId) {
                 // پاسخ به پیشنهاد
                 const pc = new RTCPeerConnection(configuration);
                 peerConnections[userId] = pc;
 
-                localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
+                if (localStream) {
+                    localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
+                }
 
                 pc.onicecandidate = (event) => {
                     if (event.candidate) {
@@ -118,10 +164,18 @@
                 };
 
                 pc.ontrack = (event) => {
+                    const videoContainer = document.createElement('div');
+                    videoContainer.className = 'video-container';
+                    videoContainer.id = `video-${userId}`;
                     const videoElement = document.createElement('video');
                     videoElement.srcObject = event.streams[0];
                     videoElement.play();
-                    document.getElementById('video-grid').appendChild(videoElement);
+                    videoContainer.appendChild(videoElement);
+                    const userIdLabel = document.createElement('div');
+                    userIdLabel.className = 'user-id';
+                    userIdLabel.textContent = `کاربر ${userId.slice(0, 8)}`;
+                    videoContainer.appendChild(userIdLabel);
+                    document.getElementById('video-grid').appendChild(videoContainer);
                 };
 
                 await pc.setRemoteDescription(new RTCSessionDescription(data.offer));
@@ -132,15 +186,26 @@
                     answer: answer,
                     to: userId
                 }));
-            } else if (data.type === 'answer') {
+            } else if (data.type === 'answer' && userId !== localUserId) {
                 await peerConnections[userId].setRemoteDescription(new RTCSessionDescription(data.answer));
-            } else if (data.type === 'ice-candidate') {
+            } else if (data.type === 'ice-candidate' && userId !== localUserId) {
                 await peerConnections[userId].addIceCandidate(new RTCIceCandidate(data.candidate));
+            } else if (data.type === 'user-disconnected' && userId !== localUserId) {
+                // حذف کادر ویدیوی کاربر قطع‌شده
+                const videoContainer = document.getElementById(`video-${userId}`);
+                if (videoContainer) {
+                    videoContainer.remove();
+                }
+                if (peerConnections[userId]) {
+                    peerConnections[userId].close();
+                    delete peerConnections[userId];
+                }
             }
         };
 
         socket.onclose = () => {
             console.log('اتصال WebSocket بسته شد');
+            alert('اتصال به سرور قطع شد.');
         };
     </script>
 </body>
