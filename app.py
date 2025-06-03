@@ -5,7 +5,7 @@ import os
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'secret!')
-socketio = SocketIO(app)
+socketio = SocketIO(app, cors_allowed_origins="*")
 
 # ذخیره کاربران متصل
 connected_users = {}
@@ -38,6 +38,3 @@ def handle_message(data):
     to_user = data.get('to')
     if to_user in connected_users:
         emit('message', {**data, 'userId': [uid for uid, sid in connected_users.items() if sid == request.sid][0]}, room=connected_users[to_user])
-
-if __name__ == '__main__':
-    socketio.run(app, host='0.0.0.0', port=int(os.environ.get('PORT', 10000)), debug=True)
