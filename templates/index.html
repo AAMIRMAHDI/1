@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="fa">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>چت ویدیویی گروهی</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            direction: rtl;
+            text-align: center;
+            background-color: #f0f0f0;
+        }
+        #video-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+            gap: 10px;
+            margin: 20px;
+        }
+        video {
+            width: 100%;
+            border: 2px solid #333;
+            border-radius: 8px;
+        }
+        h1 {
+            color: #333;
+        }
+    </style>
+</head>
+<body>
+    <h1>چت ویدیویی گروهی</h1>
+    <div id="video-grid"></div>
+
+    <script>
+        // تنظیمات WebRTC
+        const socket = new WebSocket('wss://' + window.location.host + '/ws');
+        const configuration = {
+            iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+        };
+        let peerConnections = {};
+        let localStream;
+
+        // دسترسی به دوربین
+        async function startVideo() {
+            try {
+                localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+                const videoElement = document.createElement('video');
+                videoElement.srcObject = localStream;
+                videoElement.muted = true; // بی‌صدا کردن ویدیوی خود کاربر
+                videoElement.play();
+                document.getElementById('video-grid').appendChild(videoElement);
+            } catch (err) {
+                console.error('خطا در دسترسی به دوربین: ', err);
+                alert('لطفاً دسترسی به دوربین را مجاز کنید.');
+            }
+        }
+
+        // مدیریت اتصال WebSocket
+        socket.onopen = () => {
+            console.log('اتصال WebSocket برقرار شد');
+            startVideo();
+        };
+
+        socket.onmessage = async (event) => {
+            const data = JSON.parse(event.data);
+            const userId = data.userId;
+
+            if (data.type === 'new-user') {
+                // ایجاد اتصال جدید برای کاربر جدید
+                const pc = new RTCPeerConnection(configuration);
+                peerConnections[userId] = pc;
+
+                // اضافه کردن استریم محلی به اتصال
+                localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
+
+                // مدیریت ICE candidate
+                pc.onicecandidate = (event) => {
+                    if (event.candidate) {
+                        socket.send(JSON.stringify({
+                            type: 'ice-candidate',
+                            candidate: event.candidate,
+                            to: userId
+                        }));
+                    }
+                };
+
+                // دریافت استریم ریموت
+                pc.ontrack = (event) => {
+                    const videoElement = document.createElement('video');
+                    videoElement.srcObject = event.streams[0];
+                    videoElement.play();
+                    document.getElementById('video-grid').appendChild(videoElement);
+                };
+
+                // ایجاد پیشنهاد (offer)
+                const offer = await pc.createOffer();
+                await pc.setLocalDescription(offer);
+                socket.send(JSON.stringify({
+                    type: 'offer',
+                    offer: offer,
+                    to: userId
+                }));
+            } else if (data.type === 'offer') {
+                // پاسخ به پیشنهاد
+                const pc = new RTCPeerConnection(configuration);
+                peerConnections[userId] = pc;
+
+                localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
+
+                pc.onicecandidate = (event) => {
+                    if (event.candidate) {
+                        socket.send(JSON.stringify({
+                            type: 'ice-candidate',
+                            candidate: event.candidate,
+                            to: userId
+                        }));
+                    }
+                };
+
+                pc.ontrack = (event) => {
+                    const videoElement = document.createElement('video');
+                    videoElement.srcObject = event.streams[0];
+                    videoElement.play();
+                    document.getElementById('video-grid').appendChild(videoElement);
+                };
+
+                await pc.setRemoteDescription(new RTCSessionDescription(data.offer));
+                const answer = await pc.createAnswer();
+                await pc.setLocalDescription(answer);
+                socket.send(JSON.stringify({
+                    type: 'answer',
+                    answer: answer,
+                    to: userId
+                }));
+            } else if (data.type === 'answer') {
+                await peerConnections[userId].setRemoteDescription(new RTCSessionDescription(data.answer));
+            } else if (data.type === 'ice-candidate') {
+                await peerConnections[userId].addIceCandidate(new RTCIceCandidate(data.candidate));
+            }
+        };
+
+        socket.onclose = () => {
+            console.log('اتصال WebSocket بسته شد');
+        };
+    </script>
+</body>
+</html>
