@@ -38,3 +38,7 @@ def handle_message(data):
     to_user = data.get('to')
     if to_user in connected_users:
         emit('message', {**data, 'userId': [uid for uid, sid in connected_users.items() if sid == request.sid][0]}, room=connected_users[to_user])
+
+if __name__ == '__main__':
+    # برای تست لوکال
+    socketio.run(app, host='0.0.0.0', port=int(os.environ.get('PORT', 5000)), debug=True, allow_unsafe_werkzeug=True)
